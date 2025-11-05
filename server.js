@@ -58,6 +58,34 @@ app.post("/shopify-fulfillment", async (req,res)=>{
     res.status(500).json({ ok:false, error:"fulfillment handler failed" });
   }
 });
+async function sendKlaviyoDelivered(email, orderId, tracking) {
+  const payload = {
+    data: {
+      type: "event",
+      attributes: {
+        metric: { name: "Order Delivered" },
+        properties: { tracking_number: tracking, order_id: orderId },
+        profile: { data: { type: "profile", attributes: { email } } },
+        time: new Date().toISOString()
+      }
+    }
+  };
+
+  const r = await fetch("https://a.klaviyo.com/api/events/", {
+    method: "POST",
+    headers: {
+      "Authorization": `Klaviyo-API-Key ${process.env.KLAVIYO_PRIVATE_KEY}`,
+      "revision": "2024-06-15",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(`Klaviyo ${r.status}: ${text}`);
+  }
+}
 
 // Royal Mail delivered webhook
 app.post("/royalmail-webhook", async (req,res)=>{
