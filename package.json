@@ -1,13 +1,17 @@
 {
-  "name": "vivital-webhooks",
-  "private": true,
+  "name": "royal-mail",
+  "version": "1.0.0",
   "type": "module",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.2",
-    "pg": "^8.12.0",
-    "body-parser": "^1.20.2"
+    "body-parser": "^1.20.3",
+    "pg": "^8.12.0"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
