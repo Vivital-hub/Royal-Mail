@@ -31,7 +31,7 @@ async function init() {
   console.log("DB ready");
 }
 
-// --- Klaviyo helper (correct headers + payload shape + real errors) ---
+// --- Klaviyo helper (correct v2 payload + real errors) ---
 async function sendKlaviyoDelivered(email, orderId, tracking) {
   if (!process.env.KLAVIYO_PRIVATE_KEY) {
     throw new Error("KLAVIYO_PRIVATE_KEY is not set");
@@ -44,16 +44,25 @@ async function sendKlaviyoDelivered(email, orderId, tracking) {
     data: {
       type: "event",
       attributes: {
-        metric: { name: "Order Delivered" },
-        properties: {
-          tracking_number: tracking,
-          order_id: orderId,
+        metric: {
+          data: {
+            type: "metric",
+            attributes: {
+              name: "Order Delivered",
+            },
+          },
         },
         profile: {
           data: {
             type: "profile",
-            attributes: { email },
+            attributes: {
+              email,
+            },
           },
+        },
+        properties: {
+          tracking_number: tracking,
+          order_id: orderId,
         },
         time: new Date().toISOString(),
       },
@@ -198,7 +207,6 @@ app.post("/royalmail-webhook", async (req, res) => {
     return res.json({ ok: true });
   } catch (e) {
     console.error("royalmail-webhook error:", e);
-    // expose real reason to curl + logs
     return res
       .status(502)
       .json({ ok: false, error: String(e.message || e) });
