@@ -8,7 +8,7 @@ import nodemailer from "nodemailer";
 // ---------- Config via ENV ----------
 const {
   // Royal Mail / Click & Drop API
-  RM_API_BASE,            // e.g. https://api.clickanddrop.royalmail.com (placeholder)
+  RM_API_BASE,            // e.g. https://api.clickanddrop.royalmail.com
   RM_API_TOKEN,           // Bearer token for Click & Drop
   // Email
   MAIL_HOST,
@@ -19,7 +19,9 @@ const {
   BRAND_NAME = "Vivital",
   // Utility
   SIMULATE = "0",         // "1" to use fake orders (no RM API call)
-  SINCE_HOURS = "24"      // pull last 24 hours by default
+  SINCE_HOURS = "24",     // pull last 24 hours by default
+  // NEW: optional prefix filter (e.g. "VIV-")
+  ORDER_REF_PREFIX
 } = process.env;
 
 // Optional: accept a CLI --since=ISO override (useful for manual tests)
@@ -32,12 +34,13 @@ const sinceUK = sinceISO
   ? DateTime.fromISO(sinceISO).setZone("Europe/London")
   : nowUK.minus({ hours: Number(SINCE_HOURS) });
 
+// ---------------- FETCH ORDERS ----------------
 async function fetchOrdersFromClickAndDrop(sinceISO) {
   if (SIMULATE === "1") {
     // Fake data for testing without API
     return [
       {
-        orderNumber: "CND-10001",
+        orderNumber: "VIV-10001",
         recipient: { name: "Jess Example" },
         address: {
           line1: "2 Higher Hall Cottages, Norbury Town Lane",
@@ -49,7 +52,7 @@ async function fetchOrdersFromClickAndDrop(sinceISO) {
         createdAt: DateTime.now().minus({ hours: 2 }).toISO()
       },
       {
-        orderNumber: "CND-10002",
+        orderNumber: "JD-20001",
         recipient: { name: "Alex Customer" },
         address: {
           line1: "10 Baker Street",
@@ -63,8 +66,7 @@ async function fetchOrdersFromClickAndDrop(sinceISO) {
     ];
   }
 
-  // ----- Replace this block with the real Click & Drop API call you use -----
-  // Example structure (pseudocode – fill in your real endpoint/params):
+  // ----- Real Click & Drop API call -----
   const url = `${RM_API_BASE}/orders?since=${encodeURIComponent(sinceISO)}`;
   const res = await fetch(url, {
     headers: {
@@ -76,10 +78,13 @@ async function fetchOrdersFromClickAndDrop(sinceISO) {
     const text = await res.text();
     throw new Error(`C&D fetch failed: ${res.status} ${text}`);
   }
+
   const data = await res.json();
-  // Normalize to the shape used below:
+
+  // Normalize to standard shape
   return (data.orders || []).map(o => ({
     orderNumber: o.orderNumber,
+    orderReference: o.orderReference ?? o.orderNumber,
     recipient: { name: o.recipient?.name || "" },
     address: {
       line1: o.address?.line1 || "",
@@ -90,9 +95,9 @@ async function fetchOrdersFromClickAndDrop(sinceISO) {
     service: o.service || "",
     createdAt: o.createdAt
   }));
-  // -------------------------------------------------------------------------
 }
 
+// ---------------- PDF GENERATOR ----------------
 async function generateOrderPDF(orders, { sinceUK, nowUK }) {
   const doc = new PDFDocument({ margin: 36 }); // 0.5" margins
   const chunks = [];
@@ -101,7 +106,10 @@ async function generateOrderPDF(orders, { sinceUK, nowUK }) {
   // Header
   doc.fontSize(18).text(`${BRAND_NAME} — Royal Mail Orders`, { align: "center" });
   doc.moveDown(0.2);
-  doc.fontSize(11).text(`Window: ${sinceUK.toFormat("dd LLL yyyy HH:mm")} → ${nowUK.toFormat("dd LLL yyyy HH:mm")} (Europe/London)`, { align: "center" });
+  doc.fontSize(11).text(
+    `Window: ${sinceUK.toFormat("dd LLL yyyy HH:mm")} → ${nowUK.toFormat("dd LLL yyyy HH:mm")} (Europe/London)`,
+    { align: "center" }
+  );
   doc.moveDown();
 
   // Table headers
@@ -142,6 +150,7 @@ async function generateOrderPDF(orders, { sinceUK, nowUK }) {
   });
 }
 
+// ---------------- EMAIL SENDER ----------------
 async function sendEmail({ pdfBuffer, subject }) {
   const transporter = nodemailer.createTransport({
     host: MAIL_HOST,
@@ -159,14 +168,28 @@ async function sendEmail({ pdfBuffer, subject }) {
   });
 }
 
+// ---------------- MAIN ----------------
 (async function run() {
   try {
     const sinceISO_utc = sinceUK.setZone("UTC").toISO();
     const orders = await fetchOrdersFromClickAndDrop(sinceISO_utc);
-    const pdf = await generateOrderPDF(orders, { sinceUK, nowUK });
+
+    // --- Vivital-only filter (prefix like "VIV-") ---
+    const prefix = (ORDER_REF_PREFIX || "").trim();
+    const filtered = prefix
+      ? orders.filter(o => {
+          const ref = (o.orderReference || o.orderNumber || "").toString();
+          return ref.startsWith(prefix);
+        })
+      : orders;
+
+    const pdf = await generateOrderPDF(filtered, { sinceUK, nowUK });
     const subject = `${BRAND_NAME} — Royal Mail Orders — ${nowUK.toFormat("dd LLL yyyy HH:mm")}`;
     await sendEmail({ pdfBuffer: pdf, subject });
-    console.log(`Sent ${orders.length} orders. Window ${sinceUK.toISO()} -> ${nowUK.toISO()}`);
+
+    console.log(
+      `Sent ${filtered.length} orders (from ${orders.length} total). Window ${sinceUK.toISO()} -> ${nowUK.toISO()} Prefix=${prefix || "(none)"}`
+    );
   } catch (err) {
     console.error("FAILED:", err);
     process.exitCode = 1;
