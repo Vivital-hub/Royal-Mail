@@ -27,7 +27,7 @@ const {
   SIMULATE = "0",
   SINCE_HOURS = "24",
   ORDER_REF_PREFIX,
-  LABEL_ROTATE_DEG = "90",      // 0, 90, 180, 270 (as needed)
+  LABEL_ROTATE_DEG = "90"      // 0, 90, 180, 270 (as needed)
 } = process.env;
 
 // Optional CLI --since=ISO
@@ -106,15 +106,15 @@ function renderPackSheetTopToBuffer(order) {
     // Company heading (simple)
     doc.fontSize(18).text(`${BRAND_NAME} Ltd`, { align: "right" });
     doc.moveDown(0.2);
-    doc.fontSize(9).fillColor("#666").text("Unit 4 Rockhaven Business Centre, Westbury, Wiltshire, BA13 4FZ, United Kingdom", { align: "right" });
+    doc.fontSize(9).fillColor("#666")
+      .text("Unit 4 Rockhaven Business Centre, Westbury, Wiltshire, BA13 4FZ, United Kingdom", { align: "right" });
     doc.fillColor("#000").moveDown();
 
     // Shipping Address
     doc.fontSize(12).text("Shipping Address", 36, doc.y);
     doc.fontSize(11).moveDown(0.2);
     doc.text(order.recipient?.name || "");
-    const addrLines = [order.address?.line1, order.address?.city, order.address?.postcode, "United Kingdom"]
-      .filter(Boolean);
+    const addrLines = [order.address?.line1, order.address?.city, order.address?.postcode, "United Kingdom"].filter(Boolean);
     addrLines.forEach(l => doc.text(l));
     doc.moveDown();
 
@@ -129,9 +129,12 @@ function renderPackSheetTopToBuffer(order) {
     // Items table
     doc.moveTo(36, doc.y).lineTo(559, doc.y).strokeColor("#ccc").stroke().strokeColor("#000");
     doc.moveDown(0.4);
-    doc.fontSize(11).text("Qty", 36, doc.y, { width: 40, continued: true });
-    doc.text("SKU", { width: 90, continued: true });
-    doc.text("Name", { width: 393 });
+
+    // Headers with fixed widths (single line)
+    doc.fontSize(11);
+    doc.text("Qty", 36, doc.y, { width: 30, continued: true, lineBreak: false });
+    doc.text("SKU", { width: 70, continued: true, lineBreak: false });
+    doc.text("Name", { width: 400, lineBreak: false });
     doc.moveDown(0.2);
     doc.moveTo(36, doc.y).lineTo(559, doc.y).strokeColor("#ccc").stroke().strokeColor("#000");
     doc.moveDown(0.3);
@@ -139,14 +142,13 @@ function renderPackSheetTopToBuffer(order) {
 
     for (const it of (order.items || [])) {
       const y = doc.y;
-      doc.text(String(it.quantity ?? 1), 36, y, { width: 40, continued: true });
-      doc.text(it.sku || "—", { width: 90, continued: true });
-      doc.text(it.name || "—", { width: 393 });
+      doc.text(String(it.quantity ?? 1), 36, y, { width: 30, continued: true, lineBreak: false });
+      doc.text(it.sku || "—",            { width: 70, continued: true, lineBreak: false });
+      doc.text(it.name || "—",           { width: 400, lineBreak: false, ellipsis: true });
       doc.moveDown(0.2);
     }
 
     // Leave bottom ~380pt clear for the label panel
-    // Draw a faint divider where label will start (visual aid)
     const labelTopY = 842 - 380; // approx 462pt
     doc.moveTo(36, labelTopY).lineTo(559, labelTopY).strokeColor("#ddd").stroke().strokeColor("#000");
 
@@ -166,7 +168,7 @@ async function fetchLabelsForOrders(orders, sinceISO_utc) {
     } catch { return null; }
   }));
 
-  const havePerOrder = perOrder.every(x => x); // all found
+  const havePerOrder = perOrder.length && perOrder.every(x => x);
   if (havePerOrder) return perOrder;
 
   // Fall back to batch labels PDF mapped by index
@@ -176,7 +178,6 @@ async function fetchLabelsForOrders(orders, sinceISO_utc) {
       : RM_LABELS_PDF_URL;
     try {
       const batchBuf = await fetchBuffer(url, { headers: { Authorization: `Bearer ${RM_API_TOKEN}` } });
-      // Split pages
       const pdf = await PDFLib.load(batchBuf);
       const out = [];
       for (let i = 0; i < Math.min(pdf.getPageCount(), orders.length); i++) {
@@ -196,18 +197,16 @@ async function fetchLabelsForOrders(orders, sinceISO_utc) {
 // ------------- compose final per-order pages -------------
 async function buildPackSheetsPDF(orders, labels) {
   const merged = await PDFLib.create();
-
-  // Build a quick map by ref for per-order label lookup
   const labelMap = new Map(labels.map(l => [String(l.ref || ""), l.buffer]));
 
   for (const o of orders) {
-    // 1) render the top section with pdfkit
+    // 1) render top section
     const topBuf = await renderPackSheetTopToBuffer(o);
     const topDoc = await PDFLib.load(topBuf);
     const [topPage] = await merged.copyPages(topDoc, [0]);
     merged.addPage(topPage);
 
-    // 2) if we have a label PDF for this order, embed it into the bottom area of the same page
+    // 2) embed label (if found)
     const idx = merged.getPageCount() - 1;
     const page = merged.getPage(idx);
     const pageWidth = page.getWidth();   // 595
@@ -218,32 +217,28 @@ async function buildPackSheetsPDF(orders, labels) {
       try {
         const src = await PDFLib.load(labelBuf);
         const labelPage = await merged.embedPage(src.getPage(0));
-        // available area at bottom
+
         const margin = 36;
-        const availWidth = pageWidth - margin * 2;       // ~523
-        const availHeight = 360;                          // ~360pt panel
+        const availWidth = pageWidth - margin * 2; // ~523
+        const availHeight = 360;                   // ~360pt panel
         const rotate = Number(LABEL_ROTATE_DEG || 0);
 
-        // Natural dims of the embedded page
         let { width, height } = labelPage.size();
-        // If rotation requested, swap logical dims
         const rotated = (rotate % 180) !== 0;
         if (rotated) [width, height] = [height, width];
 
-        // Scale to fit inside avail area
         const scale = Math.min(availWidth / width, availHeight / height);
         const drawWidth = width * scale;
         const drawHeight = height * scale;
 
         const x = margin + (availWidth - drawWidth) / 2;
-        const y = margin + (pageHeight - margin - drawHeight) - 10; // stick to bottom panel
+        const y = margin + (pageHeight - margin - drawHeight) - 10;
 
         page.drawPage(labelPage, {
           x, y, xScale: scale, yScale: scale,
           rotate: rotate ? { type: "degrees", angle: rotate } : undefined
         });
       } catch (e) {
-        // if embedding fails, just continue
         console.warn("Embed label failed for", o.orderReference || o.orderNumber, e.message);
       }
     }
