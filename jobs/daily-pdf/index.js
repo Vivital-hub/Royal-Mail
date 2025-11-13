@@ -63,7 +63,7 @@ async function fetchOrdersFromClickAndDrop(sinceISO) {
           { sku: "TS1200", name: "Street Kingz Premium 1200GSM Heavy Duty Car Drying Towel - Ultra-Absorbent, 60x90cm - Twisted Loop Technology", quantity: 1 },
           { sku: "FSP01", name: "Microfibre Scrub Pad - Soft Microfibre/Rough Bristles - Perfect For Interior Cleaning", quantity: 1 }
         ],
-        // labelPdfUrl: "https://example.com/testlabel.pdf"
+        // labelPdfUrl: "https://example.com/test-label.pdf"
       }
     ];
   }
@@ -123,33 +123,37 @@ function renderPackSheetTopToBuffer(order) {
     doc.text(`Despatch Date: ${nowUK.toFormat("dd/LL/yyyy")}`);
     doc.moveDown(0.6);
 
-    // Table layout
-    const X_QTY = 36, W_QTY = 30;
-    const X_SKU = X_QTY + W_QTY + 6, W_SKU = 70;
-    const X_NAME = X_SKU + W_SKU + 6, W_NAME = 410;
+    // ===== Items table =====
+    doc.moveTo(36, doc.y).lineTo(559, doc.y).strokeColor("#ccc").stroke().strokeColor("#000");
+    doc.moveDown(0.4);
+
+    // Fixed columns
+    const X_QTY = 36,  W_QTY = 30;
+    const X_SKU = 72,  W_SKU = 70;
+    const X_NAME = 148, W_NAME = 411;
+    const ROW_H = 12;
 
     // Headers
     doc.fontSize(11);
-    doc.text("Qty", X_QTY, doc.y, { width: W_QTY, lineBreak: false });
-    doc.text("SKU", X_SKU, doc.y, { width: W_SKU, lineBreak: false });
+    doc.text("Qty",  X_QTY,  doc.y, { width: W_QTY,  lineBreak: false });
+    doc.text("SKU",  X_SKU,  doc.y, { width: W_SKU,  lineBreak: false });
     doc.text("Name", X_NAME, doc.y, { width: W_NAME, lineBreak: false });
     doc.moveDown(0.2);
-    doc.moveTo(36, doc.y).lineTo(559, doc.y).strokeColor("#ccc").stroke();
+    doc.moveTo(36, doc.y).lineTo(559, doc.y).strokeColor("#ccc").stroke().strokeColor("#000");
     doc.moveDown(0.3);
     doc.fontSize(10);
 
-    // Rows
-    const ROW_H = 12;
+    // Rows – SINGLE LINE with ellipsis
     for (const it of (order.items || [])) {
       const y = doc.y;
-      doc.text(String(it.quantity ?? 1), X_QTY, y, { width: W_QTY, lineBreak: false });
-      doc.text(it.sku || "—", X_SKU, y, { width: W_SKU, lineBreak: false });
-      doc.text(it.name || "—", X_NAME, y, { width: W_NAME, lineBreak: false, ellipsis: true });
+      doc.text(String(it.quantity ?? 1), X_QTY,  y, { width: W_QTY,  height: ROW_H, lineBreak: false });
+      doc.text(it.sku || "—",            X_SKU,  y, { width: W_SKU,  height: ROW_H, lineBreak: false });
+      doc.text(it.name || "—",           X_NAME, y, { width: W_NAME, height: ROW_H, lineBreak: false, ellipsis: true });
       doc.y = y + ROW_H;
-      doc.moveTo(36, doc.y).lineTo(559, doc.y).strokeColor("#eee").stroke();
+      doc.moveTo(36, doc.y).lineTo(559, doc.y).strokeColor("#eee").stroke().strokeColor("#000");
     }
 
-    // Space for label
+    // Divider for label
     const labelTopY = 842 - 380;
     doc.moveTo(36, labelTopY).lineTo(559, labelTopY).strokeColor("#ddd").stroke();
 
