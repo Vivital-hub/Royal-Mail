@@ -9,12 +9,10 @@ import { PDFDocument as PDFLib } from "pdf-lib";
 
 // ---------- Config via ENV ----------
 const {
-  // Royal Mail / Click & Drop API
   RM_API_BASE,
   RM_API_TOKEN,
-  RM_LABELS_PDF_URL,           // optional batch labels PDF
+  RM_LABELS_PDF_URL, // optional batch labels PDF
 
-  // Graph email
   MS_TENANT_ID,
   MS_CLIENT_ID,
   MS_CLIENT_SECRET,
@@ -23,11 +21,10 @@ const {
 
   BRAND_NAME = "Vivital",
 
-  // Utility
   SIMULATE = "0",
   SINCE_HOURS = "24",
   ORDER_REF_PREFIX,
-  LABEL_ROTATE_DEG = "90"      // 0, 90, 180, 270 (as needed)
+  LABEL_ROTATE_DEG = "90" // 0, 90, 180, 270
 } = process.env;
 
 // Optional CLI --since=ISO
@@ -66,7 +63,7 @@ async function fetchOrdersFromClickAndDrop(sinceISO) {
           { sku: "TS1200", name: "Street Kingz Premium 1200GSM Heavy Duty Car Drying Towel - Ultra-Absorbent, 60x90cm - Twisted Loop Technology", quantity: 1 },
           { sku: "FSP01", name: "Microfibre Scrub Pad - Soft Microfibre/Rough Bristles - Perfect For Interior Cleaning", quantity: 1 }
         ],
-        // labelPdfUrl: "https://example.com/label1.pdf"
+        // labelPdfUrl: "https://example.com/testlabel.pdf"
       }
     ];
   }
@@ -99,11 +96,11 @@ async function fetchOrdersFromClickAndDrop(sinceISO) {
 // ------------- build per-order pack page (despatch note) -------------
 function renderPackSheetTopToBuffer(order) {
   return new Promise(resolve => {
-    const doc = new PDFDocument({ size: "A4", margin: 36 }); // 595 x 842pt
+    const doc = new PDFDocument({ size: "A4", margin: 36 });
     const chunks = [];
     doc.on("data", c => chunks.push(c));
 
-    // Company heading (simple)
+    // Header
     doc.fontSize(18).text(`${BRAND_NAME} Ltd`, { align: "right" });
     doc.moveDown(0.2);
     doc.fontSize(9).fillColor("#666")
@@ -118,7 +115,7 @@ function renderPackSheetTopToBuffer(order) {
     addrLines.forEach(l => doc.text(l));
     doc.moveDown();
 
-    // Meta: order no, channel ref, despatch date
+    // Meta info
     const created = order.createdAt ? DateTime.fromISO(order.createdAt).setZone("Europe/London") : nowUK;
     doc.fontSize(10);
     doc.text(`Order Number: ${order.orderNumber || order.orderReference || ""}`);
@@ -126,31 +123,35 @@ function renderPackSheetTopToBuffer(order) {
     doc.text(`Despatch Date: ${nowUK.toFormat("dd/LL/yyyy")}`);
     doc.moveDown(0.6);
 
-    // Items table
-    doc.moveTo(36, doc.y).lineTo(559, doc.y).strokeColor("#ccc").stroke().strokeColor("#000");
-    doc.moveDown(0.4);
+    // Table layout
+    const X_QTY = 36, W_QTY = 30;
+    const X_SKU = X_QTY + W_QTY + 6, W_SKU = 70;
+    const X_NAME = X_SKU + W_SKU + 6, W_NAME = 410;
 
-    // Headers with fixed widths (single line)
+    // Headers
     doc.fontSize(11);
-    doc.text("Qty", 36, doc.y, { width: 30, continued: true, lineBreak: false });
-    doc.text("SKU", { width: 70, continued: true, lineBreak: false });
-    doc.text("Name", { width: 400, lineBreak: false });
+    doc.text("Qty", X_QTY, doc.y, { width: W_QTY, lineBreak: false });
+    doc.text("SKU", X_SKU, doc.y, { width: W_SKU, lineBreak: false });
+    doc.text("Name", X_NAME, doc.y, { width: W_NAME, lineBreak: false });
     doc.moveDown(0.2);
-    doc.moveTo(36, doc.y).lineTo(559, doc.y).strokeColor("#ccc").stroke().strokeColor("#000");
+    doc.moveTo(36, doc.y).lineTo(559, doc.y).strokeColor("#ccc").stroke();
     doc.moveDown(0.3);
     doc.fontSize(10);
 
+    // Rows
+    const ROW_H = 12;
     for (const it of (order.items || [])) {
       const y = doc.y;
-      doc.text(String(it.quantity ?? 1), 36, y, { width: 30, continued: true, lineBreak: false });
-      doc.text(it.sku || "—",            { width: 70, continued: true, lineBreak: false });
-      doc.text(it.name || "—",           { width: 400, lineBreak: false, ellipsis: true });
-      doc.moveDown(0.2);
+      doc.text(String(it.quantity ?? 1), X_QTY, y, { width: W_QTY, lineBreak: false });
+      doc.text(it.sku || "—", X_SKU, y, { width: W_SKU, lineBreak: false });
+      doc.text(it.name || "—", X_NAME, y, { width: W_NAME, lineBreak: false, ellipsis: true });
+      doc.y = y + ROW_H;
+      doc.moveTo(36, doc.y).lineTo(559, doc.y).strokeColor("#eee").stroke();
     }
 
-    // Leave bottom ~380pt clear for the label panel
-    const labelTopY = 842 - 380; // approx 462pt
-    doc.moveTo(36, labelTopY).lineTo(559, labelTopY).strokeColor("#ddd").stroke().strokeColor("#000");
+    // Space for label
+    const labelTopY = 842 - 380;
+    doc.moveTo(36, labelTopY).lineTo(559, labelTopY).strokeColor("#ddd").stroke();
 
     doc.end();
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -160,7 +161,7 @@ function renderPackSheetTopToBuffer(order) {
 // ------------- labels fetch -------------
 async function fetchLabelsForOrders(orders, sinceISO_utc) {
   // Prefer per-order URLs
-  const perOrder = await Promise.all(orders.map(async (o) => {
+  const perOrder = await Promise.all(orders.map(async o => {
     if (!o.labelPdfUrl) return null;
     try {
       const buf = await fetchBuffer(o.labelPdfUrl, { headers: { Authorization: `Bearer ${RM_API_TOKEN}` } });
@@ -171,7 +172,7 @@ async function fetchLabelsForOrders(orders, sinceISO_utc) {
   const havePerOrder = perOrder.length && perOrder.every(x => x);
   if (havePerOrder) return perOrder;
 
-  // Fall back to batch labels PDF mapped by index
+  // Fallback: batch labels PDF
   if (RM_LABELS_PDF_URL) {
     const url = RM_LABELS_PDF_URL.includes("{{since}}")
       ? RM_LABELS_PDF_URL.replace("{{since}}", encodeURIComponent(sinceISO_utc))
@@ -188,39 +189,35 @@ async function fetchLabelsForOrders(orders, sinceISO_utc) {
       }
       return out;
     } catch {
-      // no labels available
+      console.warn("No labels found in batch PDF");
     }
   }
   return orders.map(o => ({ ref: o.orderReference || o.orderNumber, buffer: null }));
 }
 
-// ------------- compose final per-order pages -------------
+// ------------- compose final PDF -------------
 async function buildPackSheetsPDF(orders, labels) {
   const merged = await PDFLib.create();
   const labelMap = new Map(labels.map(l => [String(l.ref || ""), l.buffer]));
 
   for (const o of orders) {
-    // 1) render top section
     const topBuf = await renderPackSheetTopToBuffer(o);
     const topDoc = await PDFLib.load(topBuf);
     const [topPage] = await merged.copyPages(topDoc, [0]);
     merged.addPage(topPage);
 
-    // 2) embed label (if found)
-    const idx = merged.getPageCount() - 1;
-    const page = merged.getPage(idx);
-    const pageWidth = page.getWidth();   // 595
-    const pageHeight = page.getHeight(); // 842
-
+    const page = merged.getPage(merged.getPageCount() - 1);
     const labelBuf = labelMap.get(String(o.orderReference || o.orderNumber));
     if (labelBuf) {
       try {
         const src = await PDFLib.load(labelBuf);
         const labelPage = await merged.embedPage(src.getPage(0));
 
+        const pageWidth = page.getWidth();
+        const pageHeight = page.getHeight();
         const margin = 36;
-        const availWidth = pageWidth - margin * 2; // ~523
-        const availHeight = 360;                   // ~360pt panel
+        const availWidth = pageWidth - margin * 2;
+        const availHeight = 360;
         const rotate = Number(LABEL_ROTATE_DEG || 0);
 
         let { width, height } = labelPage.size();
@@ -230,7 +227,6 @@ async function buildPackSheetsPDF(orders, labels) {
         const scale = Math.min(availWidth / width, availHeight / height);
         const drawWidth = width * scale;
         const drawHeight = height * scale;
-
         const x = margin + (availWidth - drawWidth) / 2;
         const y = margin + (pageHeight - margin - drawHeight) - 10;
 
@@ -239,20 +235,16 @@ async function buildPackSheetsPDF(orders, labels) {
           rotate: rotate ? { type: "degrees", angle: rotate } : undefined
         });
       } catch (e) {
-        console.warn("Embed label failed for", o.orderReference || o.orderNumber, e.message);
+        console.warn("Label embed failed for", o.orderReference, e.message);
       }
     }
   }
-
   return Buffer.from(await merged.save());
 }
 
 // ------------- Graph email -------------
 async function sendEmailViaGraph({ subject, attachments }) {
   const { MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET, MAIL_FROM, RECIPIENT_EMAIL } = process.env;
-  if (!MS_TENANT_ID || !MS_CLIENT_ID || !MS_CLIENT_SECRET || !MAIL_FROM || !RECIPIENT_EMAIL) {
-    throw new Error("Missing Graph email env vars");
-  }
 
   const tokenRes = await fetch(`https://login.microsoftonline.com/${MS_TENANT_ID}/oauth2/v2.0/token`, {
     method: "POST",
@@ -265,9 +257,8 @@ async function sendEmailViaGraph({ subject, attachments }) {
     })
   });
   const tokenData = await tokenRes.json();
-  if (!tokenRes.ok || !tokenData.access_token) {
-    throw new Error(`Failed to get Microsoft Graph token: ${tokenRes.status} ${JSON.stringify(tokenData)}`);
-  }
+  if (!tokenRes.ok || !tokenData.access_token)
+    throw new Error(`Failed to get Graph token: ${tokenRes.status}`);
 
   const graphAttachments = attachments.map(a => ({
     "@odata.type": "#microsoft.graph.fileAttachment",
@@ -280,7 +271,7 @@ async function sendEmailViaGraph({ subject, attachments }) {
       subject,
       from: { emailAddress: { address: MAIL_FROM } },
       toRecipients: [{ emailAddress: { address: RECIPIENT_EMAIL } }],
-      body: { contentType: "Text", content: "Attached: Pack sheets (despatch note + label) ready to print." },
+      body: { contentType: "Text", content: "Attached: Pack sheets (despatch note + label)." },
       attachments: graphAttachments
     },
     saveToSentItems: "false"
@@ -288,49 +279,48 @@ async function sendEmailViaGraph({ subject, attachments }) {
 
   const sendRes = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(MAIL_FROM)}/sendMail`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${tokenData.access_token}`, "Content-Type": "application/json" },
+    headers: {
+      Authorization: `Bearer ${tokenData.access_token}`,
+      "Content-Type": "application/json"
+    },
     body: JSON.stringify(message)
   });
-  if (!sendRes.ok) {
-    const errText = await sendRes.text();
-    throw new Error(`Graph sendMail failed: ${sendRes.status} ${errText}`);
-  }
+
+  if (!sendRes.ok) throw new Error(`Graph sendMail failed: ${await sendRes.text()}`);
 }
 
 // ------------- main -------------
 (async function run() {
   try {
     const sinceISO_utc = sinceUK.setZone("UTC").toISO();
-
-    // 1) orders
     const allOrders = await fetchOrdersFromClickAndDrop(sinceISO_utc);
 
-    // 2) VIV- only
     const prefix = (ORDER_REF_PREFIX || "").trim();
     const orders = prefix
       ? allOrders.filter(o => ((o.orderReference || o.orderNumber || "") + "").startsWith(prefix))
       : allOrders;
 
     if (!orders.length) {
-      // still send an empty doc so you know it ran
       const empty = await buildPackSheetsPDF([], []);
       const subjectEmpty = `${BRAND_NAME} — Pack Sheets — ${nowUK.toFormat("dd LLL yyyy HH:mm")} (No orders)`;
-      await sendEmailViaGraph({ subject: subjectEmpty, attachments: [{ name: "pack-sheets.pdf", buffer: empty }] });
+      await sendEmailViaGraph({
+        subject: subjectEmpty,
+        attachments: [{ name: "pack-sheets.pdf", buffer: empty }]
+      });
       console.log("No orders; sent empty pack sheet.");
       return;
     }
 
-    // 3) labels (per-order or batch)
     const labels = await fetchLabelsForOrders(orders, sinceISO_utc);
-
-    // 4) compose per-order pages
     const pdf = await buildPackSheetsPDF(orders, labels);
-
-    // 5) email
     const subject = `${BRAND_NAME} — Pack Sheets — ${nowUK.toFormat("dd LLL yyyy HH:mm")}`;
-    await sendEmailViaGraph({ subject, attachments: [{ name: "pack-sheets.pdf", buffer: pdf }] });
 
-    console.log(`Sent ${orders.length} pack sheets. Window ${sinceUK.toISO()} -> ${nowUK.toISO()} Prefix=${prefix || "(none)"}`);
+    await sendEmailViaGraph({
+      subject,
+      attachments: [{ name: "pack-sheets.pdf", buffer: pdf }]
+    });
+
+    console.log(`Sent ${orders.length} pack sheets.`);
   } catch (err) {
     console.error("FAILED:", err);
     process.exitCode = 1;
